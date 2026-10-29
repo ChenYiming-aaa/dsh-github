@@ -14,6 +14,7 @@ const cases = [
   'validate-apply.mjs',
   'approval-gate.mjs',
   'redaction.mjs',
+  'auth-status-null-guard.mjs',
   'dns-fallback.mjs',
   'push-upload.mjs'
 ]
