@@ -5,3 +5,4 @@ Thumbs.db
 *.tmp
 .credentials.yaml
 .env
+.dsh-runtime/

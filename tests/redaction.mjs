@@ -27,24 +27,25 @@ assert(redact('no token here', FAKE_TOKEN) === 'no token here', '无 token 时�
 console.log('\n===== 客户端：token 只进请求头，错误信息脱敏 =====')
 {
   const seen = []
-  const fakeFetch = async (url, init) => {
-    seen.push({ url: String(url), auth: init.headers.Authorization })
+  // createClient 的注入点是 transport({ method, url, headers, body, signal }) → { status, statusText, headers, text }
+  const transport = async ({ method, url, headers }) => {
+    seen.push({ method, url: String(url), headers: headers ?? {} })
     return {
       status: 422,
-      ok: false,
-      headers: new Map(),
-      json: async () => ({ message: `bad request: ${FAKE_TOKEN}` })
+      statusText: 'Unprocessable Entity',
+      headers: { 'x-ratelimit-remaining': '59', 'x-ratelimit-limit': '60' },
+      text: JSON.stringify({ message: `bad request: ${FAKE_TOKEN}` })
     }
   }
   const client = createClient({
     resolveToken: async () => ({ token: FAKE_TOKEN, source: 'env' }),
     logger: { warn: () => {} },
-    fetchImpl: fakeFetch
+    transport
   })
   const err = await client.request('POST', '/repos/o/r/issues', { body: { title: 'x' } }).then(() => null, (e) => e)
   assert(err instanceof Error && !String(err.message).includes(FAKE_TOKEN), `422 错误信息不含 token（${err.message.slice(0, 40)}…）`)
-  assert(seen[0].auth === `Bearer ${FAKE_TOKEN}`, 'token 以 Bearer 头发送')
-  assert(!String(seen[0].url).includes(FAKE_TOKEN), 'URL 不含 token')
+  assert(seen[0]?.headers.Authorization === `Bearer ${FAKE_TOKEN}`, 'token 以 Bearer 头发送')
+  assert(!String(seen[0]?.url).includes(FAKE_TOKEN), 'URL 不含 token')
 }
 
 console.log('\n===== 工具输出不含 token =====')

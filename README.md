@@ -13,6 +13,13 @@
   DNS 直查绕过，`github_*` 工具不因 hosts 文件被改坏而失效
 - 安全：token 只进 `Authorization` 请求头，绝不落日志；错误信息与工具输出做防御性脱敏
 
+## 兼容性
+
+- 需要 `@deepseek-ai/dsh-tools` `>=0.1.0-rc.1 <0.3.0-0`（即 DSH 0.1.x 与 0.2.x）
+- 已在 **dsh 0.2.1-rc.5** 上跑通全部测试：45 个工具经真实 dsh-tools 的 schema 编译/校验
+- 运行时版本不满足 peer 范围时，DSH 会跳过本插件并提示 exact-version exemption；
+  确认风险后可用 `dsh plugin --profile <profile> allow-version dsh-github@<ver> --dsh-version <当前版本> --accept-risk` 强制加载
+
 ## 快速开始
 
 ### 1. 安装插件（web + desktop 两个 profile）
@@ -131,7 +138,17 @@ github_upload_project(repo: "my-app", description: "我的应用",
 ## 开发与测试
 
 ```powershell
-node tests/run-all.mjs    # 需要本机安装 DSH Desktop（loader 引用其 dsh-tools）
+node tests/run-all.mjs    # 首次运行会自动从本机 DSH Desktop 的 app.asar 提取 dsh-tools
+```
+
+测试需要真实版本的 `@deepseek-ai/dsh-tools`（随 DSH Desktop 打包在 `resources/app.asar` 里）。
+`tests/run-all.mjs` 会自动调用 `tests/asar-extract.mjs`，按依赖闭包把它提取到 `<repo>/.dsh-runtime/node_modules`（已 gitignore）；
+如需指定其它运行时：
+
+```powershell
+$env:DSH_APP_ASAR = 'D:\DeepSeek Harness\resources\app.asar'   # 指定 app.asar
+$env:DSH_RUNTIME_NODE_MODULES = 'D:\somewhere\node_modules'    # 或直接指定已解包的 node_modules（跳过提取）
+node tests/run-all.mjs
 ```
 
 测试覆盖：
@@ -139,6 +156,7 @@ node tests/run-all.mjs    # 需要本机安装 DSH Desktop（loader 引用其 ds
 - `validate-apply.mjs` — apply() 生命周期 + 审批门行为（危险→ask、常规→放行）
 - `approval-gate.mjs` — 危险操作分类单测
 - `redaction.mjs` — 验收：token 不出现在日志/错误/工具输出
+- `dns-fallback.mjs` — 单测 DNS 回退逻辑；带 `GITHUB_TOKEN` 时端到端打真实 GitHub API（无 token 自动跳过 E2E）
 - `push-upload.mjs` — 内存版 GitHub API 上的多文件推送与一键上传流程（建仓→推送→开 PR）
 
 ## 架构

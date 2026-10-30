@@ -7,14 +7,25 @@
  * 用法: node --import ./tests/register-loader.mjs tests/dns-fallback.mjs
  */
 
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { createClient, createGithubLookup, createHttpsTransport } from '../lib/client.js'
 
-// 从 credentials 文件读取 token（正则，避免依赖 yaml）
-const credsLine = readFileSync('C:/Users/cwqjk/.dsh/.credentials.yaml', 'utf8')
-  .split('\n')
-  .find((l) => /^\s*GITHUB_TOKEN:/.test(l)) ?? ''
-const token = credsLine.split(/:\s*/, 2)[1]?.trim() ?? ''
+/** 读取 token：环境变量 GITHUB_TOKEN 优先，其次 $DSH_HOME/.credentials.yaml（默认 ~/.dsh）。 */
+function readToken() {
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN.trim()
+  const dshHome = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
+  const credsPath = path.join(dshHome, '.credentials.yaml')
+  if (!existsSync(credsPath)) return ''
+  // 正则匹配，避免为测试引入 yaml 依赖
+  const credsLine = readFileSync(credsPath, 'utf8')
+    .split('\n')
+    .find((l) => /^\s*GITHUB_TOKEN:/.test(l)) ?? ''
+  return credsLine.split(/:\s*/, 2)[1]?.trim() ?? ''
+}
+
+const token = readToken()
 
 let failures = 0
 function assert(cond, label) {
@@ -39,6 +50,20 @@ console.log('===== 单测：lookup 回退逻辑 =====')
   })
   const result = await new Promise((resolve) => lookup('api.github.com', {}, (err, address) => resolve({ err, address })))
   assert(result.address === '140.82.112.5', '系统解析正常 → 直接用系统结果（不触发回退）')
+}
+
+// 端到端部分需要真实 GitHub token：没有 token 就只跑单测（CI 友好）。
+if (!token) {
+  console.log('\n===== 端到端：跳过（未找到 GITHUB_TOKEN）=====')
+  console.log('提示：设置环境变量 GITHUB_TOKEN，或写入 $DSH_HOME/.credentials.yaml（默认 ~/.dsh/.credentials.yaml）后重跑本测试。')
+  console.log('\n========================================')
+  if (failures === 0) {
+    console.log('✅ 单测（DNS 回退逻辑）通过；端到端因缺少 token 未运行。')
+  } else {
+    console.log(`❌ ${failures} 项断言失败`)
+    process.exitCode = 1
+  }
+  process.exit(process.exitCode ?? 0)
 }
 
 console.log('\n===== 端到端：强制回退路径连接真实 GitHub =====')

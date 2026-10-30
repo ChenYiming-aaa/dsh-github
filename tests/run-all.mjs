@@ -9,6 +9,20 @@ import { dirname, join } from 'node:path'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
+
+// 测试要用真实版本的 @deepseek-ai/dsh-tools 校验工具定义：
+// 首次运行自动从本机 DSH Desktop 的 app.asar 提取依赖闭包到 <repo>/.dsh-runtime。
+if (!process.env.DSH_RUNTIME_NODE_MODULES) {
+  try {
+    const { extractRuntime } = await import('./asar-extract.mjs')
+    extractRuntime()
+  } catch (error) {
+    console.error(`⚠️  运行时提取失败：${error.message}`)
+    console.error('   → 请安装 DSH Desktop，或用 DSH_APP_ASAR / DSH_RUNTIME_NODE_MODULES 指定运行时后重试。')
+    process.exit(1)
+  }
+}
+
 const cases = [
   'validate-tools.mjs',
   'validate-apply.mjs',

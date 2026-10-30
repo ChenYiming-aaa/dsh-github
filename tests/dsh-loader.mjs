@@ -1,18 +1,40 @@
 /**
  * dsh-loader.mjs — 测试专用 ESM loader
  *
- * 把 `@deepseek-ai/*`（以及运行时顶层依赖）映射到从新版 DSH 的
+ * 把 `@deepseek-ai/*`（以及运行时顶层依赖）映射到从 DSH 桌面版
  * `resources/app.asar` 中提取出来的 node_modules（见 tests/asar-extract.mjs），
  * 使测试用真实版本的 dsh-tools 校验插件。仅用于测试，不随插件分发。
  *
- * 解析规则：优先在提取的运行时里查找（含子路径与 package.json），
- * 找不到再交给默认 loader。
+ * 运行时的查找顺序：
+ *   1. 环境变量 DSH_RUNTIME_NODE_MODULES
+ *   2. <repo>/.dsh-runtime/node_modules（tests/asar-extract.mjs 的默认输出）
+ *
+ * 解析规则：在运行时里找到对应文件就短路，找不到再交给默认 loader。
  */
 
 import { readFileSync, existsSync } from 'node:fs'
-import { pathToFileURL } from 'node:url'
+import path from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const RUNTIME_ROOT = 'D:/deepseek harness 插件编写/.dsh-runtime/node_modules/'
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+const RUNTIME_ROOTS = [
+  process.env.DSH_RUNTIME_NODE_MODULES,
+  path.join(REPO_ROOT, '.dsh-runtime', 'node_modules')
+].filter(Boolean)
+
+function entryCandidates(pkgDir, pkg) {
+  const candidates = []
+  const pickString = (value) => (typeof value === 'string' ? value : null)
+  if (pkg.exports && typeof pkg.exports === 'object') {
+    const dot = pkg.exports['.']
+    candidates.push(pickString(dot), pickString(dot?.import), pickString(dot?.default))
+  } else {
+    candidates.push(pickString(pkg.exports))
+  }
+  candidates.push(pickString(pkg.module), pickString(pkg.main), 'lib/index.js', 'index.js')
+  return candidates.filter(Boolean).map((rel) => path.join(pkgDir, rel))
+}
 
 function runtimePath(specifier) {
   // specifier 形如 '@deepseek-ai/dsh-tools'、'@deepseek-ai/dsh-tools/package.json'、'cosmokit'
@@ -20,31 +42,34 @@ function runtimePath(specifier) {
   const scoped = specifier.startsWith('@')
   const pkgName = scoped ? `${parts[0]}/${parts[1]}` : parts[0]
   const sub = scoped ? parts.slice(2).join('/') : parts.slice(1).join('/')
-  const pkgDir = `${RUNTIME_ROOT}${pkgName}`
-  if (!existsSync(`${pkgDir}/package.json`)) return null
 
-  if (sub === '') {
-    // 包主入口
-    let main = 'lib/index.js'
+  for (const root of RUNTIME_ROOTS) {
+    const pkgDir = path.join(root, pkgName)
+    if (!existsSync(path.join(pkgDir, 'package.json'))) continue
+    let pkg = {}
     try {
-      const pkg = JSON.parse(readFileSync(`${pkgDir}/package.json`, 'utf8'))
-      if (pkg.main) main = pkg.main
-    } catch { /* keep default */ }
+      pkg = JSON.parse(readFileSync(path.join(pkgDir, 'package.json'), 'utf8'))
+    } catch {
+      /* 保持空对象 */
+    }
+    if (sub === '') {
+      const found = entryCandidates(pkgDir, pkg).find((file) => existsSync(file))
+      if (found) return found
+      continue
+    }
     const candidates = [
-      `${pkgDir}/${main}`,
-      `${pkgDir}/lib/index.js`,
-      `${pkgDir}/index.js`
+      path.join(pkgDir, sub),
+      path.join(pkgDir, `${sub}.js`),
+      path.join(pkgDir, `${sub}.mjs`),
+      path.join(pkgDir, 'lib', sub),
+      path.join(pkgDir, 'lib', `${sub}.js`),
+      path.join(pkgDir, 'lib', `${sub}.mjs`),
+      path.join(pkgDir, 'lib', sub, 'index.js')
     ]
-    return candidates.find((c) => existsSync(c)) ?? null
+    const found = candidates.find((file) => existsSync(file))
+    if (found) return found
   }
-  const candidates = [
-    `${pkgDir}/${sub}`,
-    `${pkgDir}/${sub}.js`,
-    `${pkgDir}/lib/${sub}`,
-    `${pkgDir}/lib/${sub}.js`,
-    `${pkgDir}/lib/${sub}/index.js`
-  ]
-  return candidates.find((c) => existsSync(c)) ?? null
+  return null
 }
 
 export async function resolve(specifier, context, nextResolve) {
